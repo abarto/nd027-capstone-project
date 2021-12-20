@@ -15,7 +15,15 @@ from etl.sources import (
     get_i94cntyl_df,
     get_languages_df,
     get_national_accounts_df,
-    get_temperatures_df
+    get_temperatures_df,
+    validate_airports_df,
+    validate_cbp_codes_df,
+    validate_countries_df,
+    validate_i94_data_df,
+    validate_i94cntyl_df,
+    validate_languages_df,
+    validate_national_accounts_df,
+    validate_temperatures_df
 )
 from etl.tables import generate_dim_airport_parquet, generate_dim_country_parquet, generate_fact_ingress_parquet
 
@@ -52,6 +60,17 @@ def cli():
     languages_df = get_languages_df(spark)
     national_accounts_df = get_national_accounts_df(spark)
     temperatures_df = get_temperatures_df(spark)
+
+    print("Validating staging PySpark dataframes...")
+
+    validate_airports_df(airports_df)
+    validate_cbp_codes_df(cbp_codes_df)
+    validate_countries_df(countries_df)
+    validate_i94_data_df(i94_data_df)
+    validate_i94cntyl_df(i94cntyl_df)
+    validate_languages_df(langages_df)
+    validate_national_accounts_df(national_accounts_df)
+    validate_temperatures_df(temperatures_df)
 
     print("Generating dimension and fact tables parquet files...")
 

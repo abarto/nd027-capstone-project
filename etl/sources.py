@@ -16,6 +16,8 @@ from pyspark.sql.types import ArrayType, IntegerType, StringType
 from pyspark.sql.window import Window
 from pyspark import SparkFiles
 
+from .common import _simple_validation
+
 I94_SAS_LABELS_DESCRIPTIONS_FILE = "/home/workspace/I94_SAS_Labels_Descriptions.SAS"
 
  # I'm limiting the number of files read due to restrictions on S3 usage
@@ -28,16 +30,6 @@ GLOBAL_LAND_TEMPERATURES_BY_CITY_FILE = "/data2/GlobalLandTemperaturesByCity.csv
 I94_CNTYL_FILE = "i94cntyl.csv"
 
 AIRPORT_CODES_FILE = "airport-codes_csv.csv"
-
-
-def _simple_validation(df, name, expected_columns, min_no_rows):
-    """Performs a simple validation on a DataFrame"""
-    
-    if bool(set(expected_columns) - set(df.columns)):
-         raise ValueError(f"Invalid schema on {name}")
-
-    if df.count() < min_no_rows:
-        raise ValueError(f"Suspiciously low number of rows on {name}")
 
 
 def convert_i94_sas_labels_descriptions():
@@ -89,8 +81,8 @@ def get_i94_data_df(spark):
     # Filter only rows for air travel
     # Convert the arrdate to a date
     # Add the age_bucket column
-    # Add an arrdate_year column for partitioning
-    # Partition by arrdate_year and i94port
+    # Add an year column for partitioning
+    # Partition by year and i94port
     i94_data_df = reduce(
         lambda accum, df: accum.union(df),
         map(
@@ -103,13 +95,13 @@ def get_i94_data_df(spark):
     .filter(F.col("i94mode") == 1)\
     .drop("i94mode")\
     .withColumn("arrdate", F.expr("date_add(to_date('1960-01-01'), arrdate)"))\
-    .withColumn("arrdate_year", F.expr("year(arrdate)"))\
-    .withColumn("age", F.expr("arrdate_year - biryear"))\
+    .withColumn("year", F.expr("year(arrdate)"))\
+    .withColumn("age", F.expr("year - biryear"))\
     .withColumn("age_bucket", F.udf(age_bucket_udf)(F.col("age")))\
     .withColumn("date_id", F.udf(lambda d: int(d.strftime("%Y%m%d")), IntegerType())(F.col("arrdate")))\
     .withColumn("gender", F.coalesce(F.col("gender"), F.lit("U")))\
     .drop("age", "biryear")\
-    .repartition("arrdate_year", "i94port")
+    .repartition("year", "i94port")
 
     return i94_data_df
 
@@ -117,7 +109,7 @@ def get_i94_data_df(spark):
 def validate_i94_data_df(df):
     """Performs simple validations on the I94 immigration data DataFrame"""
     
-    _simple_validation(df, "i94_data_df", ["i94port", "i94cit", "arrdate", "adddate_year", "gender", "age_category"], 1000000)
+    _simple_validation(df, "i94_data_df", ["i94port", "i94cit", "arrdate", "year", "gender", "age_category"], 1000000)
 
 
 def get_i94cntyl_df(spark):

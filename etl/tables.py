@@ -3,6 +3,8 @@ Fact and dimension tabales related functions for "Project: Capstone Project"
 """
 from pyspark.sql import functions as F
 
+from .common import _simple_validation
+
 
 def _get_dim_country_df(
     countries_df,
@@ -43,6 +45,12 @@ def _get_dim_country_df(
     return dim_country_df
 
 
+def _validate_dim_country_df(df):
+    """Performs simple validations on the dimCountry DataFrame"""
+    
+    _simple_validation(df, "dim_country_df", ["country_id", "nane", "languages", "gdp_per_capita"], 100)
+
+
 def generate_dim_country_parquet(
     countries_df,
     languages_df,
@@ -55,6 +63,7 @@ def generate_dim_country_parquet(
         languages_df,
         national_accounts_df
     )
+    _validate_dim_country_df(dim_country_df)
     dim_country_df.write.mode("overwrite").parquet(f"{output_dir}/dim_country")
 
 
@@ -72,6 +81,12 @@ def _get_dim_airport_df(airports_df):
     return airports_df.withColumnRenamed("ident", "airport_id")
 
 
+def _validate_dim_airport_df(df):
+    """Performs simple validations on the dimAirport DataFrame"""
+    
+    _simple_validation(df, "dim_airport_df", ["airport_id", "nane", "municipality", "state"], 100)
+
+
 def generate_dim_airport_parquet(
     airports_df,
     output_dir="parquet_files"
@@ -80,6 +95,7 @@ def generate_dim_airport_parquet(
     dim_airport_df = _get_dim_airport_df(
         airports_df
     )
+    _validate_dim_airport_df(dim_airport_df)
     dim_airport_df.write.mode("overwrite").parquet(f"{output_dir}/dim_airport")
 
 
@@ -126,6 +142,7 @@ def _get_fact_ingress_df(
         F.lower(i94cntyl_df.description) == F.lower(countries_df.name)
     ).select(
         "date_id",
+        F.col("year"),
         countries_df.alpha3.alias("country_id"),
         airports_df.ident.alias("airport_id"),
         "gender",
@@ -134,6 +151,25 @@ def _get_fact_ingress_df(
     )
 
     return fact_ingress_df
+
+
+def _validate_fact_ingress_df(df):
+    """Performs simple validations on the factIngress DataFrame"""
+    
+    _simple_validation(
+        df,
+        "fact_airport_df", [
+            "date_id",
+            "year",
+            "country_id",
+            "airport_id",
+            "gender",
+            "age_bucket",
+            "temperature_bucket"
+        ],
+        1000000
+    )
+
 
 def generate_fact_ingress_parquet(
     i94_data_df,
@@ -153,5 +189,6 @@ def generate_fact_ingress_parquet(
         i94cntyl_df,
         temperatures_df
     )
+    _validate_fact_ingress_df(fact_ingress_df)
     fact_ingress_df.write.mode("overwrite").parquet(
         f"{output_dir}/fact_ingress", partitionBy=("year", "airport_id"))
