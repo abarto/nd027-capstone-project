@@ -12,6 +12,7 @@ import requests
 
 from pyspark.sql import functions as F
 from pyspark.sql import SparkSession, Row
+from pyspark.sql.types import ArrayType, IntegerType, StringType
 from pyspark.sql.window import Window
 from pyspark import SparkFiles
 
@@ -20,8 +21,6 @@ I94_SAS_LABELS_DESCRIPTIONS_FILE = "/home/workspace/I94_SAS_Labels_Descriptions.
  # I'm limiting the number of files read due to restrictions on S3 usage
 I94_DATA_FILES = [
     "/data/18-83510-I94-Data-2016/i94_apr16_sub.sas7bdat",
-    "/data/18-83510-I94-Data-2016/i94_may16_sub.sas7bdat",
-    "/data/18-83510-I94-Data-2016/i94_jun16_sub.sas7bdat"
 ]
 
 GLOBAL_LAND_TEMPERATURES_BY_CITY_FILE = "/data2/GlobalLandTemperaturesByCity.csv"
@@ -70,26 +69,26 @@ def convert_i94_sas_labels_descriptions():
 def get_i94_data_df(spark):
     """Creates a PySpark DataFrame from the i94 immigration data"""
 
-    def age_category_udf(age):
+    def age_bucket_udf(age):
         if age is None:
             return None
 
-        category = None
+        bucket = None
 
         if age < 12:
-            category = "CH"
+            bucket = "CH"
         elif 12 <= age < 18:
-            category = "TE"
+            bucket = "TE"
         elif 18 <= age < 65:
-            category = "AD"
+            bucket = "AD"
         elif 65 < age:
-            category = "OA"
+            bucket = "OA"
 
-        return category
+        return bucket
 
     # Filter only rows for air travel
     # Convert the arrdate to a date
-    # Add the age_category column
+    # Add the age_bucket column
     # Add an arrdate_year column for partitioning
     # Partition by arrdate_year and i94port
     i94_data_df = reduce(
@@ -106,7 +105,9 @@ def get_i94_data_df(spark):
     .withColumn("arrdate", F.expr("date_add(to_date('1960-01-01'), arrdate)"))\
     .withColumn("arrdate_year", F.expr("year(arrdate)"))\
     .withColumn("age", F.expr("arrdate_year - biryear"))\
-    .withColumn("age_category", F.udf(age_category_udf)(F.col("age")))\
+    .withColumn("age_bucket", F.udf(age_bucket_udf)(F.col("age")))\
+    .withColumn("date_id", F.udf(lambda d: int(d.strftime("%Y%m%d")), IntegerType())(F.col("arrdate")))\
+    .withColumn("gender", F.coalesce(F.col("gender"), F.lit("U")))\
     .drop("age", "biryear")\
     .repartition("arrdate_year", "i94port")
 
@@ -186,34 +187,38 @@ def get_temperatures_df(spark):
         ).alias('max_year')
     ]).collect()[0].max_year
 
-    def temperature_category_udf(average_temperature):
+    def temperature_bucket_udf(average_temperature):
         if average_temperature is None:
             return None
 
-        category = None
+        bucket = None
 
         if average_temperature < 5:
-            category = "VC"
+            bucket = "VC"
         elif 5 <= average_temperature < 15:
-            category = "CO"
+            bucket = "CO"
         elif 15 <= average_temperature < 25:
-            category = "MI"
+            bucket = "MI"
         elif 25 <= average_temperature < 35:
-            category = "HO"
+            bucket = "HO"
         else:
-            category = "VH"
+            bucket = "VH"
 
-        return category
+        return bucket
 
     temperatures_df = temperatures_df\
         .where((F.year(F.col("dt")) > max_year - 5) & (F.year(F.col("dt")) <= max_year))\
-        .groupBy([F.col("City"), F.weekofyear(F.col("dt")).alias("WeekOfYear")]).agg(F.mean("AverageTemperature").alias("AverageTemperature"))\
+        .groupBy([F.col("City"), F.weekofyear(F.col("dt")).alias("week_of_year")]).agg(F.mean("AverageTemperature").alias("AverageTemperature"))\
         .withColumn(
-           "TemperatureCategory",
-           F.udf(temperature_category_udf)(F.col("AverageTemperature"))
+           "temperature_bucket",
+           F.udf(temperature_bucket_udf)(F.col("AverageTemperature"))
         )\
         .drop("AverageTemperature")\
-        .orderBy("City", "WeekOfYear")
+        .select(
+            F.col("City").alias("city"),
+            F.col("week_of_year"),
+            F.col("temperature_bucket")
+        ).orderBy("city", "week_of_year")
 
     return temperatures_df
 
@@ -296,7 +301,7 @@ def get_countries_df(spark):
     spark.sparkContext.addFile("https://raw.githubusercontent.com/OpenBookPrices/country-data/master/data/countries.csv")
 
     countries_df = spark.read.csv(f"file://{SparkFiles.get('countries.csv')}", header=True)\
-        .withColumn("languages", F.udf(lambda s: s.split(",")(F.col("languages"))))\
+        .withColumn("languages", F.udf(lambda s: s and s.split(","), ArrayType(StringType()))(F.col("languages")))\
         .select(["name", "alpha2", "alpha3", "languages"])
 
     return countries_df
