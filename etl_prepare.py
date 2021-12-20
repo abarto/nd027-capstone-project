@@ -2,7 +2,7 @@
 """
 Script to validate and prepare the runtime environment for "Project: Capstone Project"
 """
-
+from pathlib import Path
 from configparser import ConfigParser
 
 from etl.aws import ensure_output_bucket_exists, get_s3, validate_aws_config, validate_s3_config
@@ -21,7 +21,9 @@ def cli():
     except ValueError as e:
         raise SystemExit(f"Invalid AWS configuration: {e}")
 
-    print("Preparing runtime environment...")    
+    print("Preparing runtime environment...")
+
+    Path("parquet_files").mkdir()
 
     s3 = get_s3(config)
     ensure_output_bucket_exists(config, s3)
