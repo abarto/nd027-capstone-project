@@ -45,7 +45,7 @@ def _get_dim_date_df(
         f"SELECT SEQUENCE({int(start.timestamp())}, {int(end.timestamp())}, 86400) AS date_timestamp")\
         .withColumn("date_timestamp", F.explode("date_timestamp"))\
         .select(F.to_date(F.col("date_timestamp").cast("timestamp")).alias("date"))\
-        .withColumn("date_id", F.date_format(F.col("date"), "YYYYMMDD").cast("int"))\
+        .withColumn("date_id", F.date_format(F.col("date"), "yyyyMMdd").cast("int"))\
         .withColumn("year", F.year(F.col("date")).cast("short"))\
         .withColumn("month", F.month(F.col("date")).cast("short"))\
         .withColumn("day", F.dayofmonth(F.col("date")).cast("short"))\
@@ -315,6 +315,27 @@ def validate_dim_tables(connection):
         if cursor.fetchone()[0] < 100:
             raise ValueError("Low record count on dimAirport")
 
+        # Look for duplicates on dimAirpot
+        cursor.execute("""\
+        SELECT airport_id, COUNT(*) AS count
+        FROM dimAirport
+        GROUP BY 1
+        HAVING  COUNT(*) > 1
+        """)
+
+        if cursor.fetchall():
+            raise ValueError("Duplicate rows found on dimAirport")
+
+        # Look for missing important airports on dimAirpot
+        cursor.execute("""\
+        SELECT COUNT(*) AS count
+        FROM dimAirport
+        WHERE airport_id in ('KJFK', 'KMIA', 'KLAX', 'KSFO', 'PHNL')
+        """)
+
+        if cursor.fetchone()[0] < 5:
+            raise ValueError("Missing major airport on dimAirport")
+
         # Count rows on dimCountry
         cursor.execute("""\
         SELECT COUNT(*) AS count
@@ -324,6 +345,27 @@ def validate_dim_tables(connection):
         if cursor.fetchone()[0] < 100:
             raise ValueError("Low record count on dimCountry")
 
+        # Look for duplicates on dimCountry
+        cursor.execute("""\
+        SELECT country_id, COUNT(*) AS count
+        FROM dimCountry
+        GROUP BY 1
+        HAVING COUNT(*) > 1
+        """)
+
+        if cursor.fetchall():
+            raise ValueError("Duplicate rows found on dimCountry")
+
+        # Look for invalid GPD values on dimCountry
+        cursor.execute("""\
+        SELECT COUNT(*) AS count
+        FROM dimCountry
+        WHERE gdp_per_capita IS NULL or gdp_per_capita < 0
+        """)
+
+        if cursor.fetchone()[0]:
+            raise ValueError("Invalid GDP value on dimCountry")
+
         # Count rows on dimDate
         cursor.execute("""\
         SELECT COUNT(*) AS count
@@ -331,7 +373,19 @@ def validate_dim_tables(connection):
         """)
         
         if cursor.fetchone()[0] < 100:
-            raise ValueError("Low record count on dimCountry")
+            raise ValueError("Low record count on dimDate")
+            
+
+        # Look for duplicates on dimDate
+        cursor.execute("""\
+        SELECT date_id, COUNT(*) AS count
+        FROM dimDate
+        GROUP BY 1
+        HAVING COUNT(*) > 1
+        """)
+
+        if cursor.fetchall():
+            raise ValueError("Duplicate rows found on dimDate")
 
 
 
@@ -351,3 +405,45 @@ def validate_fact_tables(connection):
         
         if cursor.fetchone()[0] < 100000:
             raise ValueError("Low record count on factIngress")
+
+        # Look for factIngress rows without a country_id
+        cursor.execute("""\
+        SELECT COUNT(*)
+        FROM factIngress
+        WHERE country_id IS NULL
+        """)
+        
+        if cursor.fetchone()[0]:
+            raise ValueError("Broken dimCountry reference on factIngress")
+
+        # Look for factIngress rows without a date_id
+        cursor.execute("""\
+        SELECT COUNT(*)
+        FROM factIngress
+        WHERE date_id IS NULL
+        """)
+        
+        if cursor.fetchone()[0]:
+            raise ValueError("Broken dimDate reference on factIngress")
+
+        # Look for factIngress rows without a airport_id
+        cursor.execute("""\
+        SELECT COUNT(*)
+        FROM factIngress
+        WHERE airport_id IS NULL
+        """)
+        
+        if cursor.fetchone()[0]:
+            raise ValueError("Broken dimArport reference on factIngress")
+
+        # Count entries from the most important airport
+        cursor.execute("""\
+        SELECT COUNT(*)
+        FROM factIngress
+        WHERE airport_id = 'KJFK'
+        """)
+        
+        if cursor.fetchone()[0] < 100000:
+            raise ValueError("Low record count for KJFK on factIngress")
+
+

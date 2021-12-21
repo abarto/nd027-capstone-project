@@ -82,6 +82,7 @@ def ensure_output_bucket_exists(config, s3):
     bucket = get_output_bucket(config, s3)
 
     if bucket.creation_date is None:
+        output_bucket_name = config.get("S3", "OUTPUT_BUCKET")
         region = config.get("AWS", "REGION")
 
         try:
