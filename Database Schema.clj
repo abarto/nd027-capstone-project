@@ -8,25 +8,24 @@ Table dimDate as D {
 }
 
 Table dimCountry as C {
-  country_id char[2] [pk]
+  country_id char(2) [pk]
   name varchar [not null]
-  languages varchar[]
-  gdp_per_capita double
+  languages varchar
+  gdp_per_capita real
 }
 
 Table dimAirport as A {
-  airport_id char[4] [pk]
+  airport_id char(4) [pk]
   name varchar [not null]
   municipality varchar [not null]
-  state char[2]
+  state char(2)
 }
 
 Table factIngress as I {
-  id int [pk, increment]
+  ingress_id char(36) [pk, increment]
   date_id int [ref: > D.date_id]
-  year int
-  country_id char[2] [ref: > C.country_id]
-  airport_id char[4] [ref: > A.airport_id]
+  country_id char(2) [ref: > C.country_id]
+  airport_id char(4) [ref: > A.airport_id]
   gender char
   age_bucket char
   temperature_bucket char

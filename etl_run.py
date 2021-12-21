@@ -4,9 +4,21 @@ Script to run the ETL process for "Project: Capstone Project"
 """
 
 from configparser import ConfigParser
+from pathlib import Path
 
-from etl.aws import ensure_output_bucket_exists, get_s3, validate_aws_config, validate_s3_config
-from etl.spark import get_spark
+from etl.aws import (
+    ensure_output_bucket_exists,
+    empty_output_bucket,
+    get_s3,
+    get_output_bucket,
+    upload_directory,
+    validate_aws_config,
+    validate_redshift_config,
+    validate_runtime_iam_config,
+    validate_runtime_redshift_config,
+    validate_s3_config
+)
+from etl.redshift import get_connection
 from etl.sources import (
     get_airports_df,
     get_cbp_codes_df,
@@ -25,7 +37,21 @@ from etl.sources import (
     validate_national_accounts_df,
     validate_temperatures_df
 )
-from etl.tables import generate_dim_airport_parquet, generate_dim_country_parquet, generate_fact_ingress_parquet
+from etl.spark import get_spark
+from etl.tables import (
+    generate_dim_airport_parquet,
+    generate_dim_country_parquet,
+    generate_dim_date_parquet,
+    generate_fact_ingress_parquet,
+    load_dim_tables,
+    load_fact_tables,
+    truncate_dim_tables,
+    validate_dim_tables,
+    validate_fact_tables
+)
+
+
+PARQUET_FILES_DIR = "parquet_files"
 
 
 def cli():
@@ -38,6 +64,9 @@ def cli():
     try:
         validate_aws_config(config)
         validate_s3_config(config)
+        validate_redshift_config(config)
+        validate_runtime_iam_config(config)
+        validate_runtime_redshift_config(config)
     except ValueError as e:
         raise SystemExit(f"Invalid AWS configuration: {e}")
 
@@ -68,14 +97,15 @@ def cli():
     validate_countries_df(countries_df)
     validate_i94_data_df(i94_data_df)
     validate_i94cntyl_df(i94cntyl_df)
-    validate_languages_df(langages_df)
+    validate_languages_df(languages_df)
     validate_national_accounts_df(national_accounts_df)
     validate_temperatures_df(temperatures_df)
 
     print("Generating dimension and fact tables parquet files...")
 
-    generate_dim_airport_parquet(airports_df, output_dir="parquet_files")
-    generate_dim_country_parquet(countries_df, languages_df, national_accounts_df, output_dir="parquet_files")
+    generate_dim_airport_parquet(airports_df, output_dir=PARQUET_FILES_DIR)
+    generate_dim_country_parquet(countries_df, languages_df, national_accounts_df, output_dir=PARQUET_FILES_DIR)
+    generate_dim_date_parquet(spark)
     generate_fact_ingress_parquet(
         i94_data_df,
         airports_df,
@@ -83,8 +113,37 @@ def cli():
         countries_df,
         i94cntyl_df,
         temperatures_df,
-        output_dir="parquet_files"
+        output_dir=PARQUET_FILES_DIR
     )
+
+    bucket = get_output_bucket(config, s3)
+
+    print("Emptying output bucket...")
+
+    empty_output_bucket(bucket)
+
+    print("Uploading dimension and fact tables to S3...")
+
+    upload_directory(bucket, Path(PARQUET_FILES_DIR))
+
+    connection = get_connection(config)
+
+    print("Truncating dimension tables...")
+
+    truncate_dim_tables(connection)
+
+    print("Loading dimension tables...")
+    
+    load_dim_tables(config, connection)
+    
+    print("Loading fact tables...")
+
+    load_fact_tables(config, connection)
+
+    print("Validating dimansion and fact tables...")
+
+    validate_dim_tables(connection)
+    validate_fact_tables(connection)
 
     print("Done.")
 

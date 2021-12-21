@@ -63,9 +63,9 @@ def get_i94_data_df(spark):
 
     def age_bucket_udf(age):
         if age is None:
-            return None
+            return "UN"
 
-        bucket = None
+        bucket = "UN"
 
         if age < 12:
             bucket = "CH"
@@ -95,9 +95,9 @@ def get_i94_data_df(spark):
     .filter(F.col("i94mode") == 1)\
     .drop("i94mode")\
     .withColumn("arrdate", F.expr("date_add(to_date('1960-01-01'), arrdate)"))\
-    .withColumn("year", F.expr("year(arrdate)"))\
-    .withColumn("age", F.expr("year - biryear"))\
-    .withColumn("age_bucket", F.udf(age_bucket_udf)(F.col("age")))\
+    .withColumn("year", F.year(F.col("arrdate")))\
+    .withColumn("age", F.year(F.col("arrdate")) - F.expr("biryear"))\
+    .withColumn("age_bucket", F.coalesce(F.udf(age_bucket_udf)(F.col("age")), F.lit("UN")))\
     .withColumn("date_id", F.udf(lambda d: int(d.strftime("%Y%m%d")), IntegerType())(F.col("arrdate")))\
     .withColumn("gender", F.coalesce(F.col("gender"), F.lit("U")))\
     .drop("age", "biryear")\
@@ -109,7 +109,8 @@ def get_i94_data_df(spark):
 def validate_i94_data_df(df):
     """Performs simple validations on the I94 immigration data DataFrame"""
     
-    _simple_validation(df, "i94_data_df", ["i94port", "i94cit", "arrdate", "year", "gender", "age_category"], 1000000)
+    _simple_validation(
+        df, "i94_data_df", ["i94port", "i94cit", "arrdate", "year", "date_id", "gender", "age_bucket"], 1000000)
 
 
 def get_i94cntyl_df(spark):
@@ -181,9 +182,9 @@ def get_temperatures_df(spark):
 
     def temperature_bucket_udf(average_temperature):
         if average_temperature is None:
-            return None
+            return "UN"
 
-        bucket = None
+        bucket = "UN"
 
         if average_temperature < 5:
             bucket = "VC"
@@ -218,7 +219,7 @@ def get_temperatures_df(spark):
 def validate_temperatures_df(df):
     """Performs simple validations on the average temperatures DataFrame"""
 
-    _simple_validation(df, "temperatures_df", ['City', 'WeekOfYear', 'TemperatureCategory'], 100)
+    _simple_validation(df, "temperatures_df", ['city', 'week_of_year', 'temperature_bucket'], 100)
 
 
 def get_national_accounts_df(spark):
@@ -276,6 +277,7 @@ def get_airports_df(spark):
         .withColumn("state", F.udf(lambda s: re.sub(r"US-", "", s))(F.col("iso_region")))\
         .withColumn("row_number", F.row_number().over(municipality_state_window))\
         .filter(F.col("row_number") == 1)\
+        .withColumnRenamed("ident", "airport_id")\
         .drop("iata_code", "iso_country", "iso_region", "row_number", "type")
 
     return airports_df
@@ -283,8 +285,8 @@ def get_airports_df(spark):
 
 def validate_airports_df(df):
     """Performs simple validations on the airport codes DataFrame"""
-    
-    _simple_validation(df, "airports_df", ["ident", "municipality", "state", "name"], 10)
+
+    _simple_validation(df, "airports_df", ["airport_id", "municipality", "state", "name"], 10)
 
 
 def get_countries_df(spark):
@@ -294,6 +296,7 @@ def get_countries_df(spark):
 
     countries_df = spark.read.csv(f"file://{SparkFiles.get('countries.csv')}", header=True)\
         .withColumn("languages", F.udf(lambda s: s and s.split(","), ArrayType(StringType()))(F.col("languages")))\
+        .filter(F.col("alpha3").isNotNull())\
         .select(["name", "alpha2", "alpha3", "languages"])
 
     return countries_df
